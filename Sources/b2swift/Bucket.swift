@@ -63,7 +63,7 @@ public class Bucket: CustomStringConvertible {
         
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.addValue(b2.accountAuthorizationToken!, forHTTPHeaderField: "Authorization")
+        request.addValue(b2.authorizationToken!, forHTTPHeaderField: "Authorization")
         
         let httpJSON: JSON = ["bucketId": self.id, "bucketType": newType.rawValue, "accountId": b2.accountId]
         do {
@@ -80,3 +80,4 @@ public class Bucket: CustomStringConvertible {
         return "\(name)(id: \(id), type: \(type.rawValue))"
     }
 }
+
