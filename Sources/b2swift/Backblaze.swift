@@ -13,7 +13,7 @@ import Files
 public class Backblaze {
     public enum BackblazeError: Swift.Error {
         case urlConstructionFailed
-        case jsonProcessingFailed
+        case malformedResponse
         case unauthenticated
     }
     
@@ -41,7 +41,7 @@ public class Backblaze {
     
     /// The recommended size for each part of a large file. We recommend using this part size for optimal upload performance.
     internal var recommendedPartSize: Int?
-
+    
     /**
      * The smallest possible size of a part of a large file (except the last one).
      *
@@ -53,35 +53,37 @@ public class Backblaze {
         self.accountId = id
         self.applicationKey = key
     }
-        
+    
     //MARK:- Buckets
     
-    public func createBucket(named bucketName: String) throws -> Bucket? {
-        guard let accountAuthorizationToken = self.authorizationToken else {
+    public func createBucket(named bucketName: String) throws -> Bucket {
+        guard let apiUrl = self.apiUrl, let authorizationToken = self.authorizationToken else {
             throw BackblazeError.unauthenticated
         }
         
-        if let url = self.apiUrl?.appendingPathComponent("/b2api/v1/b2_create_bucket") {
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.addValue(accountAuthorizationToken, forHTTPHeaderField: "Authorization")
-            request.httpBody = try? JSONSerialization.data(withJSONObject: ["accountId":"\(self.accountId)", "bucketName":"\(bucketName)", "bucketType":"allPrivate"], options: .prettyPrinted)
-            
-            return Bucket(json: executeRequest(jsonFrom: request), b2: self)
-        }
+        let url = apiUrl.appendingPathComponent("/b2api/v1/b2_create_bucket")
+        var request = URLRequest(url: url)
         
-        return nil
+        request.httpMethod = "POST"
+        request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["accountId":"\(self.accountId)", "bucketName":"\(bucketName)", "bucketType":"allPrivate"], options: .prettyPrinted)
+        
+        return Bucket(json: try executeRequest(jsonFrom: request), b2: self)
     }
     
     public func listBuckets() throws -> [Bucket]  {
-        guard let url = self.apiUrl?.appendingPathComponent("/b2api/v1/b2_list_buckets") else {
-            throw BackblazeError.urlConstructionFailed
+        guard let apiUrl = self.apiUrl, let authorizationToken = self.authorizationToken else {
+            throw BackblazeError.unauthenticated
         }
+        
+        let url = apiUrl.appendingPathComponent("/b2api/v1/b2_list_buckets")
         var request = URLRequest(url: url)
+        
         request.httpMethod = "POST"
-        request.addValue(self.authorizationToken!, forHTTPHeaderField: "Authorization")
+        request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["accountId":"\(self.accountId)"], options: .prettyPrinted)
-        let json = executeRequest(jsonFrom: request)
+        
+        let json = try executeRequest(jsonFrom: request)
         
         return json["buckets"].arrayValue.map({ (bucket) -> Bucket in
             return Bucket(json: bucket, b2: self)
@@ -106,7 +108,7 @@ public class Backblaze {
         return json["fileId"].stringValue
     }
     
-    public func listFileNames(in bucket: Bucket, startFileName: String? = nil, maxFileCount: Int? = nil) -> JSON? {
+    public func listFileNames(in bucket: Bucket, startFileName: String? = nil, maxFileCount: Int? = nil) throws -> JSON {
         if let url = self.apiUrl?.appendingPathComponent("/b2api/v1/b2_list_file_names") {
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
@@ -119,39 +121,40 @@ public class Backblaze {
                 params["startFileName"] = JSON(String(maxFileCount))
             }
             request.httpBody = try! params.rawData()
-            if let requestData = executeRequest(request, withSessionConfig: nil) {
-                return JSON(data: requestData)
-            }
+            let requestData = try executeRequest(request, withSessionConfig: nil)
+            return JSON(data: requestData)
         }
-        return nil
+        return JSON.null
     }
     
     public func findFirstFileIdForName(searchFileName: String, bucket: Bucket) -> String? {
-        guard let json = self.listFileNames(in: bucket, startFileName: nil, maxFileCount: -1) else {
-            return nil
-        }
-        
-        for (_, file): (String, JSON) in json {
-            if file["fileName"].stringValue.caseInsensitiveCompare(searchFileName) == .orderedSame {
-                return file["fileId"].stringValue
+        if let json = try? self.listFileNames(in: bucket, startFileName: nil, maxFileCount: -1) {
+            for (_, file): (String, JSON) in json {
+                if file["fileName"].stringValue.caseInsensitiveCompare(searchFileName) == .orderedSame {
+                    return file["fileId"].stringValue
+                }
             }
         }
         return nil
     }
     
-    private func prepareUpload(bucket: Bucket) -> (url: URL, authToken: String)? {
-        if let url = self.apiUrl?.appendingPathComponent("/b2api/v1/b2_get_upload_url") {
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.addValue(self.authorizationToken!, forHTTPHeaderField: "Authorization")
-            request.httpBody = try? JSONSerialization.data(withJSONObject: ["bucketId":"\(bucket.id)"], options: .prettyPrinted)
-            if let requestData = executeRequest(request, withSessionConfig: nil) {
-                if let dict = (try? JSONSerialization.jsonObject(with: requestData, options: .mutableContainers)) as? [String: Any] {
-                    let uploadUrlStr = dict["uploadUrl"] as! String
-                    let uploadUrl = URL(string: uploadUrlStr)!
-                    return (url: uploadUrl, dict["authorizationToken"] as! String)
-                }
-            }
+    private func prepareUpload(bucket: Bucket) throws -> (url: URL, authToken: String)? {
+        guard let apiUrl = self.apiUrl, let authorizationToken = self.authorizationToken else {
+            throw BackblazeError.unauthenticated
+        }
+        
+        let url = apiUrl.appendingPathComponent("/b2api/v1/b2_get_upload_url")
+        var request = URLRequest(url: url)
+        
+        request.httpMethod = "POST"
+        request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["bucketId":"\(bucket.id)"], options: .prettyPrinted)
+        
+        let requestData = try executeRequest(request, withSessionConfig: nil)
+        if let dict = (try? JSONSerialization.jsonObject(with: requestData, options: .mutableContainers)) as? [String: Any] {
+            let uploadUrlStr = dict["uploadUrl"] as! String
+            let uploadUrl = URL(string: uploadUrlStr)!
+            return (url: uploadUrl, dict["authorizationToken"] as! String)
         }
         return nil
     }
@@ -182,8 +185,8 @@ public class Backblaze {
         return requestData
     }
     
-    internal func uploadFile(_ fileUrl: URL, withName fileName: String, toBucket bucket: Bucket, contentType: String, sha1: String) -> String? {
-        guard let (uploadUrl, uploadAuthToken) = self.prepareUpload(bucket: bucket) else {
+    internal func uploadFile(_ fileUrl: URL, withName fileName: String, toBucket bucket: Bucket, contentType: String, sha1: String) throws -> String? {
+        guard let (uploadUrl, uploadAuthToken) = try self.prepareUpload(bucket: bucket) else {
             return nil
         }
         
@@ -202,55 +205,59 @@ public class Backblaze {
         return jsonStr ?? ""
     }
     
-    public func downloadFile(withId fileId: String) -> Data? {
-        var downloadedData: Data? = nil
-        if let url = self.downloadUrl?.appendingPathComponent("/b2api/v1/b2_download_file_by_id") {
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.addValue(self.authorizationToken!, forHTTPHeaderField: "Authorization")
-            request.httpBody = try? JSONSerialization.data(withJSONObject: ["fileId":"\(fileId)"], options: .prettyPrinted)
-            if let requestData = executeRequest(request) {
-                downloadedData = requestData
-            }
+    public func downloadFile(withId fileId: String) throws -> Data {
+        guard let downloadUrl = self.downloadUrl, let authorizationToken = self.authorizationToken else {
+            throw BackblazeError.unauthenticated
         }
-        return downloadedData
+        
+        let url = downloadUrl.appendingPathComponent("/b2api/v1/b2_download_file_by_id")
+        var request = URLRequest(url: url)
+        
+        request.httpMethod = "POST"
+        request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["fileId":"\(fileId)"], options: .prettyPrinted)
+        
+        return try executeRequest(request)
     }
     
-    public func downloadFileEx(withId fileId: String) -> Data? {
-        var downloadedData: Data? = nil
-        if let url = self.downloadUrl {
-            if var urlComponents = URLComponents(string: url.appendingPathComponent("/b2api/v1/b2_download_file_by_id").absoluteString) {
-                urlComponents.query = "fileId=\(fileId)"
-                var request = URLRequest(url: urlComponents.url!)
-                request.httpMethod = "GET"
-                request.addValue(self.authorizationToken!, forHTTPHeaderField: "Authorization")
-                if let requestData = executeRequest(request) {
-                    downloadedData = requestData
-                }
-            }
+    public func downloadFileEx(withId fileId: String) throws -> Data {
+        guard let downloadUrl = self.downloadUrl, let authorizationToken = self.authorizationToken else {
+            throw BackblazeError.unauthenticated
         }
-        return downloadedData
+        
+        let url = downloadUrl.appendingPathComponent("/b2api/v1/b2_download_file_by_id")
+        
+        var urlComponents = URLComponents(url: url, resolvingAgainstBaseURL: true)!
+        urlComponents.query = "fileId=\(fileId)"
+        let modifiedUrl = urlComponents.url!
+        
+        var request = URLRequest(url: modifiedUrl)
+        
+        request.httpMethod = "GET"
+        request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
+        
+        return try executeRequest(request)
     }
     
-    
-    public func hideFile(named fileName: String, inBucket bucket: Bucket) -> JSON? {
-        if let url = self.apiUrl?.appendingPathComponent("/b2api/v1/b2_hide_file") {
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.addValue(self.authorizationToken!, forHTTPHeaderField: "Authorization")
-            request.httpBody = "{\"fileName\":\"\(fileName)\",\"bucketId\":\"\(bucket.id)\"}".data(using: .utf8, allowLossyConversion: false)
+    public func hideFile(named fileName: String, inBucket bucket: Bucket) throws -> JSON {
+        guard let apiUrl = self.apiUrl, let authorizationToken = self.authorizationToken else {
+            throw BackblazeError.unauthenticated
+        }
+
+        let url = apiUrl.appendingPathComponent("/b2api/v1/b2_hide_file")
+        var request = URLRequest(url: url)
+        
+        request.httpMethod = "POST"
+        request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
+        request.httpBody = "{\"fileName\":\"\(fileName)\",\"bucketId\":\"\(bucket.id)\"}".data(using: .utf8, allowLossyConversion: false)
             
-            if let requestData = executeRequest(request) {
-                return JSON(data: requestData)
-            }
-        }
-        return nil
+        return JSON(data: try executeRequest(request))
     }
     
     
     //MARK:- Common
     
-    public func executeRequest(_ request: URLRequest, withSessionConfig sessionConfig: URLSessionConfiguration? = nil) -> Data? {
+    public func executeRequest(_ request: URLRequest, withSessionConfig sessionConfig: URLSessionConfiguration? = nil) throws -> Data {
         let semaphore = DispatchSemaphore(value: 0)
         
         let session: URLSession
@@ -273,70 +280,74 @@ public class Backblaze {
         task.resume()
         semaphore.wait()
         
-        return requestData
+        if let data = requestData {
+            return data
+        } else {
+            throw BackblazeError.malformedResponse
+        }
     }
     
-    public func executeRequest(jsonFrom request: URLRequest, withSessionConfig sessionConfig: URLSessionConfiguration? = nil) -> JSON {
-        guard let data = executeRequest(request, withSessionConfig: sessionConfig) else {
-            return JSON.null
-        }
-        
+    public func executeRequest(jsonFrom request: URLRequest, withSessionConfig sessionConfig: URLSessionConfiguration? = nil) throws -> JSON {
+        let data = try executeRequest(request, withSessionConfig: sessionConfig)
         return JSON(data: data)
     }
     
     //MARK:- Unprocessed
     
-    public func b2ListFileVersions(bucketId: String, startFileName: String?, startFileId: String?, maxFileCount: Int) -> JSON? {
-        if let url = self.apiUrl?.appendingPathComponent("/b2api/v1/b2_list_file_versions") {
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.addValue(self.authorizationToken!, forHTTPHeaderField: "Authorization")
-            
-            var params: JSON = ["bucketId": bucketId]
-            if let startFileNameStr = startFileName {
-                params["startFileName"] = JSON(startFileNameStr)
-            }
-            if let startFileIdStr = startFileId {
-                params["startFileId"] = JSON(startFileIdStr)
-            }
-            if (maxFileCount > -1) {
-                params["maxFileCount"] = JSON(String(maxFileCount))
-            }
-            
-            if let data = try? params.rawData() {
-                request.httpBody = data
-                if let requestData = executeRequest(request) {
-                    return JSON(data: requestData)
-                }
-            }
+    public func b2ListFileVersions(bucketId: String, startFileName: String?, startFileId: String?, maxFileCount: Int) throws -> JSON {
+        guard let apiUrl = self.apiUrl, let authorizationToken = self.authorizationToken else {
+            throw BackblazeError.unauthenticated
         }
-        return nil
+        
+        let url = apiUrl.appendingPathComponent("/b2api/v1/b2_list_file_versions")
+        var request = URLRequest(url: url)
+        
+        request.httpMethod = "POST"
+        request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
+        
+        var params: JSON = ["bucketId": bucketId]
+        if let startFileNameStr = startFileName {
+            params["startFileName"] = JSON(startFileNameStr)
+        }
+        if let startFileIdStr = startFileId {
+            params["startFileId"] = JSON(startFileIdStr)
+        }
+        if (maxFileCount > -1) {
+            params["maxFileCount"] = JSON(String(maxFileCount))
+        }
+        
+        request.httpBody = try params.rawData()
+        return JSON(data: try executeRequest(request))
     }
     
-    public func b2GetFileInfo(fileId: String) -> JSON? {
-        if let url = self.apiUrl?.appendingPathComponent("/b2api/v1/b2_get_file_info") {
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.addValue(self.authorizationToken!, forHTTPHeaderField: "Authorization")
-            request.httpBody = "{\"fileId\":\"\(fileId)\"}".data(using: .utf8, allowLossyConversion: false)
-            if let requestData = executeRequest(request) {
-                return JSON(data: requestData)
-            }
+    public func b2GetFileInfo(fileId: String) throws -> JSON {
+        guard let apiUrl = self.apiUrl, let authorizationToken = self.authorizationToken else {
+            throw BackblazeError.unauthenticated
         }
-        return nil
+        
+        let url = apiUrl.appendingPathComponent("/b2api/v1/b2_get_file_info")
+        var request = URLRequest(url: url)
+        
+        request.httpMethod = "POST"
+        request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
+        request.httpBody = "{\"fileId\":\"\(fileId)\"}".data(using: .utf8, allowLossyConversion: false)
+        
+        return JSON(data: try executeRequest(request))
     }
     
-    public func b2DeleteFileVersion(fileId: String, fileName: String) -> JSON? {
-        if let url = self.apiUrl?.appendingPathComponent("/b2api/v1/b2_delete_file_version") {
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.addValue(self.authorizationToken!, forHTTPHeaderField: "Authorization")
-            request.httpBody = "{\"fileName\":\"\(fileName)\",\"fileId\":\"\(fileId)\"}".data(using: .utf8, allowLossyConversion: false)
-            if let requestData = executeRequest(request) {
-                return JSON(data: requestData)
-            }
+    public func b2DeleteFileVersion(fileId: String, fileName: String) throws -> JSON {
+        guard let apiUrl = self.apiUrl, let authorizationToken = self.authorizationToken else {
+            throw BackblazeError.unauthenticated
         }
-        return nil
+        
+        let url = apiUrl.appendingPathComponent("/b2api/v1/b2_delete_file_version")
+        var request = URLRequest(url: url)
+        
+        request.httpMethod = "POST"
+        request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
+        request.httpBody = "{\"fileName\":\"\(fileName)\",\"fileId\":\"\(fileId)\"}".data(using: .utf8, allowLossyConversion: false)
+        
+        return JSON(data: try executeRequest(request))
     }
 }
 

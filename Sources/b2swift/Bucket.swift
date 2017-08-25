@@ -29,7 +29,7 @@ public class Bucket: CustomStringConvertible {
     let name: String
     private(set) var type: BucketType
     
-    weak var backblaze: Backblaze?
+    weak var backblaze: Backblaze!
     
     internal init(id: String, name: String, type: String, b2: Backblaze) {
         self.id = id
@@ -52,27 +52,26 @@ public class Bucket: CustomStringConvertible {
         self.backblaze = b2
     }
     
-    public func uploadFile(_ fileUrl: URL, withName fileName: String, contentType: String, sha1: String) -> String? {
-        return self.backblaze?.uploadFile(fileUrl, withName: fileName, toBucket: self, contentType: contentType, sha1: sha1)
+    public func uploadFile(_ fileUrl: URL, withName fileName: String, contentType: String, sha1: String) throws -> String? {
+        return try self.backblaze.uploadFile(fileUrl, withName: fileName, toBucket: self, contentType: contentType, sha1: sha1)
     }
     
     public func setType(bucketType newType: Bucket.BucketType) throws {
-        guard let b2 = self.backblaze, let url = b2.apiUrl?.appendingPathComponent("/b2api/v1/b2_update_bucket") else {
-            throw Backblaze.BackblazeError.urlConstructionFailed
+        guard let apiUrl = self.backblaze.apiUrl, let authorizationToken = self.backblaze.authorizationToken else {
+            throw Backblaze.BackblazeError.unauthenticated
         }
+
+        let url = apiUrl.appendingPathComponent("/b2api/v1/b2_update_bucket")
         
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.addValue(b2.authorizationToken!, forHTTPHeaderField: "Authorization")
+        request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
         
-        let httpJSON: JSON = ["bucketId": self.id, "bucketType": newType.rawValue, "accountId": b2.accountId]
-        do {
-            request.httpBody = try httpJSON.rawData()
-        } catch _ {
-            throw Backblaze.BackblazeError.jsonProcessingFailed
-        }
+        let httpJSON: JSON = ["bucketId": self.id, "bucketType": newType.rawValue, "accountId": self.backblaze.accountId]
         
-        let json = b2.executeRequest(jsonFrom: request)
+        request.httpBody = try httpJSON.rawData()
+        
+        let json = try self.backblaze.executeRequest(jsonFrom: request)
         self.type = BucketType.interpret(type: json["bucketType"].stringValue)
     }
     
