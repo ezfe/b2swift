@@ -13,6 +13,7 @@ import Files
 public class Backblaze {
     public enum BackblazeError: Swift.Error {
         case urlConstructionFailed
+        case urlEncodingFailed
         case malformedResponse
         case unauthenticated
     }
@@ -190,12 +191,17 @@ public class Backblaze {
             return nil
         }
         
+        guard let encodedFilename = fileName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+            throw BackblazeError.urlEncodingFailed
+        }
+        
         var jsonStr: String? = nil
         if let fileData = try? Data(contentsOf: fileUrl) {
             var request = URLRequest(url: uploadUrl)
             request.httpMethod = "POST"
             request.addValue(uploadAuthToken, forHTTPHeaderField: "Authorization")
-            request.addValue(fileName, forHTTPHeaderField: "X-Bz-File-Name")
+            
+            request.addValue(encodedFilename, forHTTPHeaderField: "X-Bz-File-Name")
             request.addValue(contentType, forHTTPHeaderField: "Content-Type")
             request.addValue(sha1, forHTTPHeaderField: "X-Bz-Content-Sha1")
             if let requestData = self.executeUploadRequest(request, with: fileData) {
