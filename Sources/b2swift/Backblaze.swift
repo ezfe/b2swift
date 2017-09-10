@@ -91,7 +91,7 @@ public class Backblaze {
         })
     }
     
-    public func bucketWithName(searchBucketName: String) -> Bucket? {
+    public func bucket(named searchBucketName: String) -> Bucket? {
         do {
             for bucket in try self.listBuckets() where bucket.name == searchBucketName {
                 return bucket
@@ -137,78 +137,6 @@ public class Backblaze {
             }
         }
         return nil
-    }
-    
-    private func prepareUpload(bucket: Bucket) throws -> (url: URL, authToken: String)? {
-        guard let apiUrl = self.apiUrl, let authorizationToken = self.authorizationToken else {
-            throw BackblazeError.unauthenticated
-        }
-        
-        let url = apiUrl.appendingPathComponent("/b2api/v1/b2_get_upload_url")
-        var request = URLRequest(url: url)
-        
-        request.httpMethod = "POST"
-        request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: ["bucketId":"\(bucket.id)"], options: .prettyPrinted)
-        
-        let requestData = try executeRequest(request, withSessionConfig: nil)
-        if let dict = (try? JSONSerialization.jsonObject(with: requestData, options: .mutableContainers)) as? [String: Any] {
-            let uploadUrlStr = dict["uploadUrl"] as! String
-            let uploadUrl = URL(string: uploadUrlStr)!
-            return (url: uploadUrl, dict["authorizationToken"] as! String)
-        }
-        return nil
-    }
-    
-    private func executeUploadRequest(_ request: URLRequest, with uploadData: Data, sessionConfig: URLSessionConfiguration? = nil) -> Data? {
-        let semaphore = DispatchSemaphore(value: 0)
-        
-        let session: URLSession
-        if let sessionConfig = sessionConfig {
-            session = URLSession(configuration: sessionConfig)
-        } else {
-            session = URLSession.shared
-        }
-        
-        var requestData: Data?
-        let task = session.uploadTask(with: request, from: uploadData) { (data, response, error) in
-            if let error = error {
-                print("Erorr: \(error.localizedDescription)")
-            }
-            
-            requestData = data
-            semaphore.signal()
-        }
-        
-        task.resume()
-        semaphore.wait()
-        
-        return requestData
-    }
-    
-    internal func uploadFile(_ fileUrl: URL, withName fileName: String, toBucket bucket: Bucket, contentType: String, sha1: String) throws -> String? {
-        guard let (uploadUrl, uploadAuthToken) = try self.prepareUpload(bucket: bucket) else {
-            return nil
-        }
-        
-        guard let encodedFilename = fileName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
-            throw BackblazeError.urlEncodingFailed
-        }
-        
-        var jsonStr: String? = nil
-        if let fileData = try? Data(contentsOf: fileUrl) {
-            var request = URLRequest(url: uploadUrl)
-            request.httpMethod = "POST"
-            request.addValue(uploadAuthToken, forHTTPHeaderField: "Authorization")
-            
-            request.addValue(encodedFilename, forHTTPHeaderField: "X-Bz-File-Name")
-            request.addValue(contentType, forHTTPHeaderField: "Content-Type")
-            request.addValue(sha1, forHTTPHeaderField: "X-Bz-Content-Sha1")
-            if let requestData = self.executeUploadRequest(request, with: fileData) {
-                jsonStr = String(data: requestData, encoding: .utf8)
-            }
-        }
-        return jsonStr ?? ""
     }
     
     public func downloadFile(withId fileId: String) throws -> Data {
