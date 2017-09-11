@@ -15,14 +15,15 @@ let package = Package(
         // Dependencies declare other packages that this package depends on.
         // .package(url: /* package url */, from: "1.0.0"),
         .package(url: "https://github.com/SwiftyJSON/SwiftyJSON", from: "3.1.4"),
-        .package(url: "https://github.com/JohnSundell/Files", from: "1.11.0")
+        .package(url: "https://github.com/JohnSundell/Files", from: "1.11.0"),
+        .package(url: "https://github.com/krzyzanowskim/CryptoSwift", .branch("swift4"))
     ],
     targets: [
         // Targets are the basic building blocks of a package. A target can define a module or a test suite.
         // Targets can depend on other targets in this package, and on products in packages which this package depends on.
         .target(
             name: "b2swift",
-            dependencies: ["SwiftyJSON", "Files"]),
+            dependencies: ["SwiftyJSON", "Files", "CryptoSwift"]),
         .testTarget(
             name: "b2swiftTests",
             dependencies: ["b2swift"]),

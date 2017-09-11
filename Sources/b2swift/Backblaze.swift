@@ -8,14 +8,30 @@
 
 import Foundation
 import SwiftyJSON
-import Files
+import CryptoSwift
 
 public class Backblaze {
-    public enum BackblazeError: Swift.Error {
+    public enum BackblazeError: LocalizedError {
         case urlConstructionFailed
         case urlEncodingFailed
         case malformedResponse
         case unauthenticated
+        case uploadFailed
+        
+        public var errorDescription: String? {
+            switch self {
+            case .urlConstructionFailed:
+                return "An error occurred construction the URL"
+            case .urlEncodingFailed:
+                return "An error occurred encoding the URL parameters"
+            case .malformedResponse:
+                return "The server responded with unparseable data"
+            case .unauthenticated:
+                return "Authentication details are missing"
+            case .uploadFailed:
+                return "An error occurred uploading the file"
+            }
+        }
     }
     
     /// The base URL to use for authorization.
