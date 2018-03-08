@@ -36,7 +36,7 @@ extension Backblaze {
             struct RawAuthorizationResult: Codable {
                 var accountId: String
                 var authorizationToken: String
-                var capabilities: [String]
+//                var capabilities: [String]
                 var apiUrl: String
                 var downloadUrl: String
                 var recommendedPartSize: Int

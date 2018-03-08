@@ -56,9 +56,9 @@ public class Bucket: CustomStringConvertible {
     
     //MARK:- Uploading Files
     
-    /// Upload a file or folder at a URL
+    @available(macOS 10.11, *)
     public func upload(url: URL) throws -> JSON {
-        if #available(macOS 10.11, *), url.isFileURL {
+        if url.isFileURL {
             if url.hasDirectoryPath {
                 print(url.absoluteString)
                 let _ = try Folder(path: url.path)
@@ -71,24 +71,24 @@ public class Bucket: CustomStringConvertible {
         } else {
             let data = try Data(contentsOf: url)
             let filename = url.lastPathComponent
-            return try self.upload(data: data, withName: filename)
+            return try self.upload(data: data, at: filename)
         }
     }
     
     /// Upload a file
-    public func upload(file: File) throws -> JSON {
-        return try self.upload(data: file.read(), withName: file.name)
+    public func upload(file: File, at path: String? = nil) throws -> JSON {
+        return try self.upload(data: file.read(), at: path ?? file.name)
     }
     
     /// Upload raw data
-    public func upload(data: Data, withName fileName: String, contentType: String? = nil, sha1: String? = nil) throws -> JSON {
+    public func upload(data: Data, at path: String, contentType: String? = nil, sha1: String? = nil) throws -> JSON {
         
         // Try to generate the upload
         guard let (uploadUrl, uploadAuthToken) = try self.prepareUpload() else {
             throw Backblaze.BackblazeError.unauthenticated
         }
         
-        guard let encodedFilename = fileName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+        guard let encodedFilename = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
             throw Backblaze.BackblazeError.urlEncodingFailed
         }
         
@@ -97,7 +97,7 @@ public class Bucket: CustomStringConvertible {
         
         request.addValue(uploadAuthToken, forHTTPHeaderField: BackblazeHTTPHeaders.authorization)
         request.addValue(encodedFilename, forHTTPHeaderField: BackblazeHTTPHeaders.fileName)
-        request.addValue("fail_some_uploads", forHTTPHeaderField: "X-Bz-Test-Mode")
+//        request.addValue("fail_some_uploads", forHTTPHeaderField: "X-Bz-Test-Mode")
 
         let resolvedContentType = contentType ?? BackblazeContentTypes.auto
         request.addValue(resolvedContentType, forHTTPHeaderField: BackblazeHTTPHeaders.contentType)
