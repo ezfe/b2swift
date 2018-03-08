@@ -97,7 +97,8 @@ public class Bucket: CustomStringConvertible {
         
         request.addValue(uploadAuthToken, forHTTPHeaderField: BackblazeHTTPHeaders.authorization)
         request.addValue(encodedFilename, forHTTPHeaderField: BackblazeHTTPHeaders.fileName)
-        
+        request.addValue("fail_some_uploads", forHTTPHeaderField: "X-Bz-Test-Mode")
+
         let resolvedContentType = contentType ?? BackblazeContentTypes.auto
         request.addValue(resolvedContentType, forHTTPHeaderField: BackblazeHTTPHeaders.contentType)
         
@@ -108,7 +109,7 @@ public class Bucket: CustomStringConvertible {
             throw Backblaze.BackblazeError.uploadFailed
         }
         
-        return JSON(data: uploadResponseData)
+        return try JSON(data: uploadResponseData)
     }
     
     private func prepareUpload() throws -> (url: URL, authToken: String)? {
@@ -123,7 +124,7 @@ public class Bucket: CustomStringConvertible {
         request.addValue(authorizationToken, forHTTPHeaderField: BackblazeHTTPHeaders.authorization)
         request.httpBody = try JSONEncoder().encode(["bucketId":"\(self.id)"])
         
-        let requestResponse = JSON(data: try self.backblaze.executeRequest(request))
+        let requestResponse = try JSON(data: try self.backblaze.executeRequest(request))
         if let uploadUrlString = requestResponse["uploadUrl"].string,
             let uploadUrl = URL(string: uploadUrlString),
             let authToken = requestResponse["authorizationToken"].string {

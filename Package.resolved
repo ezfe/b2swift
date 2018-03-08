@@ -5,9 +5,9 @@
         "package": "CryptoSwift",
         "repositoryURL": "https://github.com/krzyzanowskim/CryptoSwift",
         "state": {
-          "branch": "swift4",
-          "revision": "26236083901dec1b5ad4b5ad296461cf22945a9e",
-          "version": null
+          "branch": null,
+          "revision": "f2ca9c377d4b44596a131e37eeb908221fb6e6be",
+          "version": "0.8.3"
         }
       },
       {
@@ -15,8 +15,8 @@
         "repositoryURL": "https://github.com/JohnSundell/Files",
         "state": {
           "branch": null,
-          "revision": "b2c38a856bfe5fbba66146ab4c33e267921673ba",
-          "version": "1.11.0"
+          "revision": "6171f9e9d8619678da22355560f3dbed6368058d",
+          "version": "2.0.1"
         }
       },
       {
@@ -24,8 +24,8 @@
         "repositoryURL": "https://github.com/SwiftyJSON/SwiftyJSON",
         "state": {
           "branch": null,
-          "revision": "dadbfcffd5f51e2b488a26e83f188d96755e5393",
-          "version": "3.1.4"
+          "revision": "de309166a48a9dfc51d5bc4c55c0664d981de311",
+          "version": "4.0.0"
         }
       }
     ]

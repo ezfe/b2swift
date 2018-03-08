@@ -14,6 +14,7 @@ public class Backblaze {
     public enum BackblazeError: LocalizedError {
         case urlConstructionFailed
         case urlEncodingFailed
+        case malformedRequest
         case malformedResponse
         case unauthenticated
         case uploadFailed
@@ -24,6 +25,8 @@ public class Backblaze {
                 return "An error occurred construction the URL"
             case .urlEncodingFailed:
                 return "An error occurred encoding the URL parameters"
+            case .malformedRequest:
+                return "The request could not be created with the given parameters"
             case .malformedResponse:
                 return "The server responded with unparseable data"
             case .unauthenticated:
@@ -139,7 +142,7 @@ public class Backblaze {
             }
             request.httpBody = try! params.rawData()
             let requestData = try executeRequest(request, withSessionConfig: nil)
-            return JSON(data: requestData)
+            return try JSON(data: requestData)
         }
         return JSON.null
     }
@@ -201,7 +204,7 @@ public class Backblaze {
         request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
         request.httpBody = "{\"fileName\":\"\(fileName)\",\"bucketId\":\"\(bucket.id)\"}".data(using: .utf8, allowLossyConversion: false)
             
-        return JSON(data: try executeRequest(request))
+        return try JSON(data: try executeRequest(request))
     }
     
     
@@ -239,7 +242,7 @@ public class Backblaze {
     
     public func executeRequest(jsonFrom request: URLRequest, withSessionConfig sessionConfig: URLSessionConfiguration? = nil) throws -> JSON {
         let data = try executeRequest(request, withSessionConfig: sessionConfig)
-        return JSON(data: data)
+        return try JSON(data: data)
     }
     
     //MARK:- Unprocessed
@@ -267,7 +270,7 @@ public class Backblaze {
         }
         
         request.httpBody = try params.rawData()
-        return JSON(data: try executeRequest(request))
+        return try JSON(data: try executeRequest(request))
     }
     
     public func b2GetFileInfo(fileId: String) throws -> JSON {
@@ -282,7 +285,7 @@ public class Backblaze {
         request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
         request.httpBody = "{\"fileId\":\"\(fileId)\"}".data(using: .utf8, allowLossyConversion: false)
         
-        return JSON(data: try executeRequest(request))
+        return try JSON(data: try executeRequest(request))
     }
     
     public func b2DeleteFileVersion(fileId: String, fileName: String) throws -> JSON {
@@ -297,7 +300,7 @@ public class Backblaze {
         request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
         request.httpBody = "{\"fileName\":\"\(fileName)\",\"fileId\":\"\(fileId)\"}".data(using: .utf8, allowLossyConversion: false)
         
-        return JSON(data: try executeRequest(request))
+        return try JSON(data: try executeRequest(request))
     }
 }
 

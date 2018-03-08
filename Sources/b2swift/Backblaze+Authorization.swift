@@ -22,20 +22,21 @@ extension Backblaze {
         var request = URLRequest(url: url)
         
         let authStr = "\(self.accountId):\(self.applicationKey)"
-        guard let authData = authStr.data(using: .utf8, allowLossyConversion: false) else {
-            return false
+        guard let authData = authStr.data(using: .utf8) else {
+            throw BackblazeError.malformedRequest
         }
-        let base64Str = authData.base64EncodedString(options: .lineLength76Characters)
+        let authStringBase64 = authData.base64EncodedString()
         
         request.httpMethod = "GET"
         let authSessionConfig = URLSessionConfiguration.default
-        authSessionConfig.httpAdditionalHeaders = ["Authorization": "Basic \(base64Str)"]
+        authSessionConfig.httpAdditionalHeaders = ["Authorization": "Basic \(authStringBase64)"]
         
         let requestData = try executeRequest(request, withSessionConfig: authSessionConfig)
         do {
-            struct AuthorizationResult: Codable {
+            struct RawAuthorizationResult: Codable {
                 var accountId: String
                 var authorizationToken: String
+                var capabilities: [String]
                 var apiUrl: String
                 var downloadUrl: String
                 var recommendedPartSize: Int
@@ -43,7 +44,7 @@ extension Backblaze {
             }
             
             let decoder = JSONDecoder()
-            let requestResults = try decoder.decode(AuthorizationResult.self, from: requestData)
+            let requestResults = try decoder.decode(RawAuthorizationResult.self, from: requestData)
             
             self.downloadUrl = URL(string: requestResults.downloadUrl)
             self.apiUrl = URL(string: requestResults.apiUrl)
