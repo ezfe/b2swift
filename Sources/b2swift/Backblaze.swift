@@ -9,6 +9,7 @@
 import Foundation
 import SwiftyJSON
 import CryptoSwift
+import Async
 
 public class Backblaze {
     public enum BackblazeError: LocalizedError {
@@ -76,7 +77,7 @@ public class Backblaze {
     
     //MARK:- Buckets
     
-    public func createBucket(named bucketName: String) throws -> Bucket {
+    public func createBucket(named bucketName: String, on worker: Worker) throws -> Future<Bucket> {
         guard let apiUrl = self.apiUrl, let authorizationToken = self.authorizationToken else {
             throw BackblazeError.unauthenticated
         }
@@ -88,10 +89,12 @@ public class Backblaze {
         request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["accountId":"\(self.accountId)", "bucketName":"\(bucketName)", "bucketType":"allPrivate"], options: .prettyPrinted)
         
-        return Bucket(json: try executeRequest(jsonFrom: request), b2: self)
+        return try executeRequest(jsonFrom: request, on: worker).map(to: Bucket.self) { json in
+            return Bucket(json: json, b2: self)
+        }
     }
     
-    public func listBuckets() throws -> [Bucket]  {
+    public func listBuckets(on worker: Worker) throws -> Future<[Bucket]>  {
         guard let apiUrl = self.apiUrl, let authorizationToken = self.authorizationToken else {
             throw BackblazeError.unauthenticated
         }
@@ -103,21 +106,18 @@ public class Backblaze {
         request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["accountId":"\(self.accountId)"], options: .prettyPrinted)
         
-        let json = try executeRequest(jsonFrom: request)
-        
-        return json["buckets"].arrayValue.map({ (bucket) -> Bucket in
-            return Bucket(json: bucket, b2: self)
-        })
+        return try executeRequest(jsonFrom: request, on: worker).map(to: [Bucket].self) { json in
+            return json["buckets"].arrayValue.map({ (bucket) -> Bucket in
+                return Bucket(json: bucket, b2: self)
+            })
+        }
     }
     
-    public func bucket(named searchBucketName: String) -> Bucket? {
-        do {
-            for bucket in try self.listBuckets() where bucket.name == searchBucketName {
+    public func bucket(named searchBucketName: String, on worker: Worker) throws -> Future<Bucket?> {
+        return try self.listBuckets(on: worker).map(to: Bucket?.self) { buckets in
+            for bucket in buckets where bucket.name == searchBucketName {
                 return bucket
             }
-            return nil
-        } catch {
-            print("Unable to list buckets...")
             return nil
         }
     }
@@ -128,7 +128,7 @@ public class Backblaze {
         return json["fileId"].stringValue
     }
     
-    public func listFileNames(in bucket: Bucket, startFileName: String? = nil, maxFileCount: Int? = nil) throws -> JSON {
+    public func listFileNames(in bucket: Bucket, startFileName: String? = nil, maxFileCount: Int? = nil, on worker: Worker) throws -> Future<JSON> {
         if let url = self.apiUrl?.appendingPathComponent("/b2api/v1/b2_list_file_names") {
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
@@ -141,24 +141,36 @@ public class Backblaze {
                 params["startFileName"] = JSON(String(maxFileCount))
             }
             request.httpBody = try! params.rawData()
-            let requestData = try executeRequest(request, withSessionConfig: nil)
-            return try JSON(data: requestData)
-        }
-        return JSON.null
-    }
-    
-    public func findFirstFileIdForName(searchFileName: String, bucket: Bucket) -> String? {
-        if let json = try? self.listFileNames(in: bucket, startFileName: nil, maxFileCount: -1) {
-            for (_, file): (String, JSON) in json {
-                if file["fileName"].stringValue.caseInsensitiveCompare(searchFileName) == .orderedSame {
-                    return file["fileId"].stringValue
-                }
+            
+            return try executeRequest(request, withSessionConfig: nil, on: worker).map(to: JSON.self) { data in
+                return try JSON(data: data)
             }
         }
-        return nil
+        return Future.map(on: worker) { JSON.null }
     }
     
-    public func downloadFile(withId fileId: String) throws -> Data {
+    public func findFirstFileIdForName(searchFileName: String, bucket: Bucket, on worker: Worker) -> Future<String?> {
+        do {
+            return try self.listFileNames(
+                                in: bucket,
+                                startFileName: nil,
+                                maxFileCount: -1,
+                                on: worker).map(to: String?.self) { json in
+
+                for (_, file): (String, JSON) in json {
+                    if file["fileName"].stringValue.caseInsensitiveCompare(searchFileName) == .orderedSame {
+                        return file["fileId"].stringValue
+                    }
+                }
+                return nil
+            }
+        } catch let err {
+            print(err.localizedDescription)
+            return Future.map(on: worker) { nil }
+        }
+    }
+    
+    public func downloadFile(withId fileId: String, on worker: Worker) throws -> Future<Data> {
         guard let downloadUrl = self.downloadUrl, let authorizationToken = self.authorizationToken else {
             throw BackblazeError.unauthenticated
         }
@@ -170,10 +182,10 @@ public class Backblaze {
         request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["fileId":"\(fileId)"], options: .prettyPrinted)
         
-        return try executeRequest(request)
+        return try executeRequest(request, on: worker)
     }
     
-    public func downloadFileEx(withId fileId: String) throws -> Data {
+    public func downloadFileEx(withId fileId: String, on worker: Worker) throws -> Future<Data> {
         guard let downloadUrl = self.downloadUrl, let authorizationToken = self.authorizationToken else {
             throw BackblazeError.unauthenticated
         }
@@ -189,10 +201,10 @@ public class Backblaze {
         request.httpMethod = "GET"
         request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
         
-        return try executeRequest(request)
+        return try executeRequest(request, on: worker)
     }
     
-    public func hideFile(named fileName: String, inBucket bucket: Bucket) throws -> JSON {
+    public func hideFile(named fileName: String, inBucket bucket: Bucket, on worker: Worker) throws -> Future<JSON> {
         guard let apiUrl = self.apiUrl, let authorizationToken = self.authorizationToken else {
             throw BackblazeError.unauthenticated
         }
@@ -204,15 +216,16 @@ public class Backblaze {
         request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
         request.httpBody = "{\"fileName\":\"\(fileName)\",\"bucketId\":\"\(bucket.id)\"}".data(using: .utf8, allowLossyConversion: false)
             
-        return try JSON(data: try executeRequest(request))
+        return try executeRequest(request, on: worker).map(to: JSON.self) { data in
+            return try JSON(data: data)
+        }
     }
     
     
     //MARK:- Common
     
-    public func executeRequest(_ request: URLRequest, withSessionConfig sessionConfig: URLSessionConfiguration? = nil) throws -> Data {
-        let semaphore = DispatchSemaphore(value: 0)
-        
+    public func executeRequest(_ request: URLRequest, withSessionConfig sessionConfig: URLSessionConfiguration? = nil, on worker: Worker) throws -> Future<Data> {
+
         let session: URLSession
         if let sessionConfig = sessionConfig {
             session = URLSession(configuration: sessionConfig)
@@ -220,34 +233,28 @@ public class Backblaze {
             session = URLSession.shared
         }
         
-        var requestData: Data?
-        let task = session.dataTask(with: request) { (data, response, error) in
-            if let error = error {
-                print("Erorr: \(error.localizedDescription)")
+        let requestDataPromise = worker.eventLoop.newPromise(Data.self)
+        session.dataTask(with: request) { (data, response, error) in
+            if let data = data {
+                requestDataPromise.succeed(result: data)
+            } else {
+                requestDataPromise.fail(error: error ?? BackblazeError.malformedResponse)
             }
             
-            requestData = data
-            semaphore.signal()
         }
         
-        task.resume()
-        semaphore.wait()
-        
-        if let data = requestData {
-            return data
-        } else {
-            throw BackblazeError.malformedResponse
-        }
+        return requestDataPromise.futureResult
     }
     
-    public func executeRequest(jsonFrom request: URLRequest, withSessionConfig sessionConfig: URLSessionConfiguration? = nil) throws -> JSON {
-        let data = try executeRequest(request, withSessionConfig: sessionConfig)
-        return try JSON(data: data)
+    public func executeRequest(jsonFrom request: URLRequest, withSessionConfig sessionConfig: URLSessionConfiguration? = nil, on worker: Worker) throws -> Future<JSON> {
+        return try executeRequest(request, withSessionConfig: sessionConfig, on: worker).map(to: JSON.self) { data in
+            return try JSON(data: data)
+        }
     }
     
     //MARK:- Unprocessed
     
-    public func b2ListFileVersions(bucketId: String, startFileName: String?, startFileId: String?, maxFileCount: Int) throws -> JSON {
+    public func b2ListFileVersions(bucketId: String, startFileName: String?, startFileId: String?, maxFileCount: Int, on worker: Worker) throws -> Future<JSON> {
         guard let apiUrl = self.apiUrl, let authorizationToken = self.authorizationToken else {
             throw BackblazeError.unauthenticated
         }
@@ -270,10 +277,12 @@ public class Backblaze {
         }
         
         request.httpBody = try params.rawData()
-        return try JSON(data: try executeRequest(request))
+        return try executeRequest(request, on: worker).map(to: JSON.self) { data in
+            return try JSON(data: data)
+        }
     }
     
-    public func b2GetFileInfo(fileId: String) throws -> JSON {
+    public func b2GetFileInfo(fileId: String, on worker: Worker) throws -> Future<JSON> {
         guard let apiUrl = self.apiUrl, let authorizationToken = self.authorizationToken else {
             throw BackblazeError.unauthenticated
         }
@@ -285,10 +294,12 @@ public class Backblaze {
         request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
         request.httpBody = "{\"fileId\":\"\(fileId)\"}".data(using: .utf8, allowLossyConversion: false)
         
-        return try JSON(data: try executeRequest(request))
+        return try executeRequest(request, on: worker).map(to: JSON.self) { data in
+            return try JSON(data: data)
+        }
     }
     
-    public func b2DeleteFileVersion(fileId: String, fileName: String) throws -> JSON {
+    public func b2DeleteFileVersion(fileId: String, fileName: String, on worker: Worker) throws -> Future<JSON> {
         guard let apiUrl = self.apiUrl, let authorizationToken = self.authorizationToken else {
             throw BackblazeError.unauthenticated
         }
@@ -300,7 +311,9 @@ public class Backblaze {
         request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
         request.httpBody = "{\"fileName\":\"\(fileName)\",\"fileId\":\"\(fileId)\"}".data(using: .utf8, allowLossyConversion: false)
         
-        return try JSON(data: try executeRequest(request))
+        return try executeRequest(request, on: worker).map(to: JSON.self) { data in
+            return try JSON(data: data)
+        }
     }
 }
 

@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Async
 
 extension Backblaze {
     /**
@@ -17,7 +18,7 @@ extension Backblaze {
      * API equivelant to b2_authorize_account
      */
     @discardableResult
-    public func authorize() throws -> Bool {
+    public func authorize(on worker: Worker) throws -> Future<Bool> {
         let url = self.authURL.appendingPathComponent("b2api/v1/b2_authorize_account")
         var request = URLRequest(url: url)
         
@@ -31,31 +32,32 @@ extension Backblaze {
         let authSessionConfig = URLSessionConfiguration.default
         authSessionConfig.httpAdditionalHeaders = ["Authorization": "Basic \(authStringBase64)"]
         
-        let requestData = try executeRequest(request, withSessionConfig: authSessionConfig)
-        do {
-            struct RawAuthorizationResult: Codable {
-                var accountId: String
-                var authorizationToken: String
-//                var capabilities: [String]
-                var apiUrl: String
-                var downloadUrl: String
-                var recommendedPartSize: Int
-                var absoluteMinimumPartSize: Int
+        return try executeRequest(request, withSessionConfig: authSessionConfig, on: worker).map(to: Bool.self) { data in
+            do {
+                struct RawAuthorizationResult: Codable {
+                    var accountId: String
+                    var authorizationToken: String
+                    //                var capabilities: [String]
+                    var apiUrl: String
+                    var downloadUrl: String
+                    var recommendedPartSize: Int
+                    var absoluteMinimumPartSize: Int
+                }
+                
+                let decoder = JSONDecoder()
+                let requestResults = try decoder.decode(RawAuthorizationResult.self, from: data)
+                
+                self.downloadUrl = URL(string: requestResults.downloadUrl)
+                self.apiUrl = URL(string: requestResults.apiUrl)
+                self.authorizationToken = requestResults.authorizationToken
+                self.recommendedPartSize = requestResults.recommendedPartSize
+                self.absoluteMinimumPartSize = requestResults.absoluteMinimumPartSize
+                
+                return true
+            } catch {
+                throw BackblazeError.malformedResponse
             }
-            
-            let decoder = JSONDecoder()
-            let requestResults = try decoder.decode(RawAuthorizationResult.self, from: requestData)
-            
-            self.downloadUrl = URL(string: requestResults.downloadUrl)
-            self.apiUrl = URL(string: requestResults.apiUrl)
-            self.authorizationToken = requestResults.authorizationToken
-            self.recommendedPartSize = requestResults.recommendedPartSize
-            self.absoluteMinimumPartSize = requestResults.absoluteMinimumPartSize
-        } catch {
-            throw BackblazeError.malformedResponse
         }
-        
-        return true
     }
     
 }

@@ -10,6 +10,7 @@ import Foundation
 import SwiftyJSON
 import CryptoSwift
 import Files
+import Async
 
 public class Bucket: CustomStringConvertible {
     public enum BucketType: String {
@@ -31,7 +32,7 @@ public class Bucket: CustomStringConvertible {
     let name: String
     private(set) var type: BucketType
     
-    weak var backblaze: Backblaze!
+    unowned var backblaze: Backblaze
     
     internal init(id: String, name: String, type: String, b2: Backblaze) {
         self.id = id
@@ -57,7 +58,7 @@ public class Bucket: CustomStringConvertible {
     //MARK:- Uploading Files
     
     @available(macOS 10.11, *)
-    public func upload(url: URL) throws -> JSON {
+    public func upload(url: URL, on worker: Worker) throws -> Future<JSON> {
         if url.isFileURL {
             if url.hasDirectoryPath {
                 print(url.absoluteString)
@@ -66,53 +67,57 @@ public class Bucket: CustomStringConvertible {
                 throw Backblaze.BackblazeError.uploadFailed
             } else {
                 let file = try File(path: url.path)
-                return try self.upload(file: file)
+                return try self.upload(file: file, on: worker)
             }
         } else {
             let data = try Data(contentsOf: url)
             let filename = url.lastPathComponent
-            return try self.upload(data: data, at: filename)
+            return try self.upload(data: data, at: filename, on: worker)
         }
     }
     
     /// Upload a file
-    public func upload(file: File, at path: String? = nil) throws -> JSON {
-        return try self.upload(data: file.read(), at: path ?? file.name)
+    public func upload(file: Files.File, at path: String? = nil, on worker: Worker) throws -> Future<JSON> {
+        return try self.upload(data: file.read(), at: path ?? file.name, on: worker)
     }
     
     /// Upload raw data
-    public func upload(data: Data, at path: String, contentType: String? = nil, sha1: String? = nil) throws -> JSON {
-        
-        // Try to generate the upload
-        guard let (uploadUrl, uploadAuthToken) = try self.prepareUpload() else {
-            throw Backblaze.BackblazeError.unauthenticated
+    public func upload(data: Data, at path: String, contentType: String? = nil, sha1: String? = nil, on worker: Worker) throws -> Future<JSON> {
+        return try self.prepareUpload(on: worker).map(to: PreparedUploadInfo.self) { uploadInfo in
+            guard let uploadInfo = uploadInfo else {
+                throw Backblaze.BackblazeError.unauthenticated
+            }
+            return uploadInfo
+        }.flatMap(to: Data.self) { uploadInfo in
+            guard let encodedFilename = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+                throw Backblaze.BackblazeError.urlEncodingFailed
+            }
+            
+            var request = URLRequest(url: uploadInfo.url)
+            request.httpMethod = "POST"
+            
+            request.addValue(uploadInfo.authToken, forHTTPHeaderField: BackblazeHTTPHeaders.authorization)
+            request.addValue(encodedFilename, forHTTPHeaderField: BackblazeHTTPHeaders.fileName)
+            //        request.addValue("fail_some_uploads", forHTTPHeaderField: "X-Bz-Test-Mode")
+            
+            let resolvedContentType = contentType ?? BackblazeContentTypes.auto
+            request.addValue(resolvedContentType, forHTTPHeaderField: BackblazeHTTPHeaders.contentType)
+            
+            let resolvedSha1 = sha1 ?? data.sha1().map({ String(format: "%02hhx", $0) }).joined()
+            request.addValue(resolvedSha1, forHTTPHeaderField: BackblazeHTTPHeaders.contentSHA1)
+            
+            return self.executeUploadRequest(request, with: data, on: worker)
+        }.map(to: JSON.self) { data in
+            return try JSON(data: data)
         }
-        
-        guard let encodedFilename = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
-            throw Backblaze.BackblazeError.urlEncodingFailed
-        }
-        
-        var request = URLRequest(url: uploadUrl)
-        request.httpMethod = "POST"
-        
-        request.addValue(uploadAuthToken, forHTTPHeaderField: BackblazeHTTPHeaders.authorization)
-        request.addValue(encodedFilename, forHTTPHeaderField: BackblazeHTTPHeaders.fileName)
-//        request.addValue("fail_some_uploads", forHTTPHeaderField: "X-Bz-Test-Mode")
-
-        let resolvedContentType = contentType ?? BackblazeContentTypes.auto
-        request.addValue(resolvedContentType, forHTTPHeaderField: BackblazeHTTPHeaders.contentType)
-        
-        let resolvedSha1 = sha1 ?? data.sha1().map({ String(format: "%02hhx", $0) }).joined()
-        request.addValue(resolvedSha1, forHTTPHeaderField: BackblazeHTTPHeaders.contentSHA1)
-        
-        guard let uploadResponseData = self.executeUploadRequest(request, with: data) else {
-            throw Backblaze.BackblazeError.uploadFailed
-        }
-        
-        return try JSON(data: uploadResponseData)
     }
     
-    private func prepareUpload() throws -> (url: URL, authToken: String)? {
+    private struct PreparedUploadInfo {
+        let url: URL
+        let authToken: String
+    }
+    
+    private func prepareUpload(on worker: Worker) throws -> Future<PreparedUploadInfo?> {
         guard let apiUrl = self.backblaze.apiUrl, let authorizationToken = self.backblaze.authorizationToken else {
             throw Backblaze.BackblazeError.unauthenticated
         }
@@ -124,18 +129,21 @@ public class Bucket: CustomStringConvertible {
         request.addValue(authorizationToken, forHTTPHeaderField: BackblazeHTTPHeaders.authorization)
         request.httpBody = try JSONEncoder().encode(["bucketId":"\(self.id)"])
         
-        let requestResponse = try JSON(data: try self.backblaze.executeRequest(request))
-        if let uploadUrlString = requestResponse["uploadUrl"].string,
-            let uploadUrl = URL(string: uploadUrlString),
-            let authToken = requestResponse["authorizationToken"].string {
-            return (url: uploadUrl, authToken: authToken)
-        } else {
-            return nil
+        return try self.backblaze.executeRequest(request, on: worker).map(to: JSON.self) { data in
+            return try JSON(data: data)
+        }.map(to: PreparedUploadInfo?.self) { requestResponse in
+            if let uploadUrlString = requestResponse["uploadUrl"].string,
+                let uploadUrl = URL(string: uploadUrlString),
+                let authToken = requestResponse["authorizationToken"].string {
+                
+                return PreparedUploadInfo(url: uploadUrl, authToken: authToken)
+            } else {
+                return nil
+            }
         }
     }
     
-    private func executeUploadRequest(_ request: URLRequest, with uploadData: Data, sessionConfig: URLSessionConfiguration? = nil) -> Data? {
-        let semaphore = DispatchSemaphore(value: 0)
+    private func executeUploadRequest(_ request: URLRequest, with uploadData: Data, sessionConfig: URLSessionConfiguration? = nil, on worker: Worker) -> Future<Data> {
         
         let session: URLSession
         if let sessionConfig = sessionConfig {
@@ -144,25 +152,22 @@ public class Bucket: CustomStringConvertible {
             session = URLSession.shared
         }
         
-        var requestData: Data?
-        let task = session.uploadTask(with: request, from: uploadData) { (data, response, error) in
-            if let error = error {
-                print("Erorr: \(error.localizedDescription)")
+        let requestDataPromise = worker.eventLoop.newPromise(Data.self)
+        session.uploadTask(with: request, from: uploadData) { (data, response, error) in
+            if let data = data {
+                requestDataPromise.succeed(result: data)
+            } else {
+                requestDataPromise.fail(error: error ?? Backblaze.BackblazeError.uploadFailed)
             }
             
-            requestData = data
-            semaphore.signal()
         }
         
-        task.resume()
-        semaphore.wait()
-        
-        return requestData
+        return requestDataPromise.futureResult
     }
     
     //MARK:-
     
-    public func setType(bucketType newType: Bucket.BucketType) throws {
+    public func setType(bucketType newType: Bucket.BucketType, on worker: Worker) throws {
         guard let apiUrl = self.backblaze.apiUrl, let authorizationToken = self.backblaze.authorizationToken else {
             throw Backblaze.BackblazeError.unauthenticated
         }
@@ -177,8 +182,10 @@ public class Bucket: CustomStringConvertible {
         
         request.httpBody = try httpJSON.rawData()
         
-        let json = try self.backblaze.executeRequest(jsonFrom: request)
-        self.type = BucketType.interpret(type: json["bucketType"].stringValue)
+        _ =
+            try self.backblaze.executeRequest(jsonFrom: request, on: worker).map(to: Void.self) { json in
+            self.type = BucketType.interpret(type: json["bucketType"].stringValue)
+        }
     }
     
     public var description: String {
