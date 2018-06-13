@@ -225,7 +225,6 @@ public class Backblaze {
     //MARK:- Common
     
     public func executeRequest(_ request: URLRequest, withSessionConfig sessionConfig: URLSessionConfiguration? = nil, on worker: Worker) throws -> Future<Data> {
-
         let session: URLSession
         if let sessionConfig = sessionConfig {
             session = URLSession(configuration: sessionConfig)
@@ -234,14 +233,14 @@ public class Backblaze {
         }
         
         let requestDataPromise = worker.eventLoop.newPromise(Data.self)
-        session.dataTask(with: request) { (data, response, error) in
+        let task = session.dataTask(with: request) { (data, response, error) in
             if let data = data {
                 requestDataPromise.succeed(result: data)
             } else {
                 requestDataPromise.fail(error: error ?? BackblazeError.malformedResponse)
             }
-            
         }
+        task.resume()
         
         return requestDataPromise.futureResult
     }

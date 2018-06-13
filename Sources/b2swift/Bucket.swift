@@ -153,14 +153,14 @@ public class Bucket: CustomStringConvertible {
         }
         
         let requestDataPromise = worker.eventLoop.newPromise(Data.self)
-        session.uploadTask(with: request, from: uploadData) { (data, response, error) in
+        let task = session.uploadTask(with: request, from: uploadData) { (data, response, error) in
             if let data = data {
                 requestDataPromise.succeed(result: data)
             } else {
                 requestDataPromise.fail(error: error ?? Backblaze.BackblazeError.uploadFailed)
             }
-            
         }
+        task.resume()
         
         return requestDataPromise.futureResult
     }
