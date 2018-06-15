@@ -7,7 +7,6 @@
 //
 
 import Foundation
-import SwiftyJSON
 import CryptoSwift
 import Files
 import Async
@@ -179,10 +178,8 @@ public class Bucket: CustomStringConvertible {
         request.httpMethod = "POST"
         request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
         
-        let httpJSON: JSON = ["bucketId": self.id, "bucketType": newType.rawValue, "accountId": self.backblaze.accountId]
-        
-        request.httpBody = try httpJSON.rawData()
-        
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["bucketId": self.id, "bucketType": newType.rawValue, "accountId": self.backblaze.accountId], options: .prettyPrinted)
+
         _ = try self.backblaze.executeRequest(request, on: worker)
     }
     

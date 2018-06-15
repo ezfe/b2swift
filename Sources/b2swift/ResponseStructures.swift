@@ -30,3 +30,17 @@ public struct UploadFileResponse: Codable {
     let action: String
     let uploadTimestamp: Date
 }
+
+/// Response from b2_list_file_names
+///
+/// [Backblaze Documentation](https://www.backblaze.com/b2/docs/b2_list_file_names.html)
+public struct ListFileNamesResponse: Codable {
+    let fileId: String
+    let fileName: String
+    let accountId: String
+    let bucketId: String
+    let contentSha1: String
+    let contentType: String
+    let action: String
+    let uploadTimestamp: Date
+}
