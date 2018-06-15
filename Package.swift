@@ -24,7 +24,7 @@ let package = Package(
         // Targets can depend on other targets in this package, and on products in packages which this package depends on.
         .target(
             name: "b2swift",
-            dependencies: ["SwiftyJSON", "Files", "CryptoSwift", "Async"]),
+            dependencies: ["Files", "CryptoSwift", "Async"]),
         .testTarget(
             name: "b2swiftTests",
             dependencies: ["b2swift"]),
