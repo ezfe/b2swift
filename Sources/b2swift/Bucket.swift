@@ -13,7 +13,13 @@ import Files
 import Async
 
 public class Bucket: CustomStringConvertible {
-    public enum BucketType: String {
+    public struct CreatePayload: Codable {
+        let bucketId: String
+        let bucketName: String
+        let bucketType: Bucket.BucketType
+    }
+    
+    public enum BucketType: String, Codable {
         case allPublic
         case allPrivate
         case share
@@ -48,17 +54,14 @@ public class Bucket: CustomStringConvertible {
         self.backblaze = b2
     }
     
-    internal init(json: JSON, b2: Backblaze) {
-        self.id = json["bucketId"].stringValue
-        self.name = json["bucketName"].stringValue
-        self.type = BucketType.interpret(type: json["bucketType"].stringValue)
-        self.backblaze = b2
+    internal convenience init(_ payload: CreatePayload, b2: Backblaze) {
+        self.init(id: payload.bucketId, name: payload.bucketName, type: payload.bucketType, b2: b2)
     }
     
     //MARK:- Uploading Files
     
     @available(macOS 10.11, *)
-    public func upload(url: URL, on worker: Worker) throws -> Future<JSON> {
+    public func upload(url: URL, on worker: Worker) throws -> Future<UploadFileResponse> {
         if url.isFileURL {
             if url.hasDirectoryPath {
                 print(url.absoluteString)
@@ -77,23 +80,22 @@ public class Bucket: CustomStringConvertible {
     }
     
     /// Upload a file
-    public func upload(file: Files.File, at path: String? = nil, on worker: Worker) throws -> Future<JSON> {
+    public func upload(file: Files.File, at path: String? = nil, on worker: Worker) throws -> Future<UploadFileResponse> {
         return try self.upload(data: file.read(), at: path ?? file.name, on: worker)
     }
     
     /// Upload raw data
-    public func upload(data: Data, at path: String, contentType: String? = nil, sha1: String? = nil, on worker: Worker) throws -> Future<JSON> {
-        return try self.prepareUpload(on: worker).map(to: PreparedUploadInfo.self) { uploadInfo in
-            guard let uploadInfo = uploadInfo else {
-                throw Backblaze.BackblazeError.unauthenticated
-            }
-            return uploadInfo
-        }.flatMap(to: Data.self) { uploadInfo in
+    public func upload(data: Data, at path: String, contentType: String? = nil, sha1: String? = nil, on worker: Worker) throws -> Future<UploadFileResponse> {
+        return try self.prepareUpload(on: worker).flatMap(to: Data.self) { uploadInfo in
             guard let encodedFilename = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
                 throw Backblaze.BackblazeError.urlEncodingFailed
             }
             
-            var request = URLRequest(url: uploadInfo.url)
+            guard let url = URL(string: uploadInfo.url) else {
+                throw Backblaze.BackblazeError.urlEncodingFailed
+            }
+            
+            var request = URLRequest(url: url)
             request.httpMethod = "POST"
             
             request.addValue(uploadInfo.authToken, forHTTPHeaderField: BackblazeHTTPHeaders.authorization)
@@ -107,17 +109,24 @@ public class Bucket: CustomStringConvertible {
             request.addValue(resolvedSha1, forHTTPHeaderField: BackblazeHTTPHeaders.contentSHA1)
             
             return self.executeUploadRequest(request, with: data, on: worker)
-        }.map(to: JSON.self) { data in
-            return try JSON(data: data)
+        }.map(to: UploadFileResponse.self) { data in
+            let jdc = JSONDecoder()
+            jdc.dateDecodingStrategy = .millisecondsSince1970
+            return try jdc.decode(UploadFileResponse.self, from: data)
         }
     }
     
-    private struct PreparedUploadInfo {
-        let url: URL
+    private struct PreparedUploadInfo: Codable {
+        let url: String
         let authToken: String
+        
+        enum CodingKeys: String, CodingKey {
+            case url = "uploadUrl"
+            case authToken = "authorizationToken"
+        }
     }
     
-    private func prepareUpload(on worker: Worker) throws -> Future<PreparedUploadInfo?> {
+    private func prepareUpload(on worker: Worker) throws -> Future<PreparedUploadInfo> {
         guard let apiUrl = self.backblaze.apiUrl, let authorizationToken = self.backblaze.authorizationToken else {
             throw Backblaze.BackblazeError.unauthenticated
         }
@@ -129,17 +138,9 @@ public class Bucket: CustomStringConvertible {
         request.addValue(authorizationToken, forHTTPHeaderField: BackblazeHTTPHeaders.authorization)
         request.httpBody = try JSONEncoder().encode(["bucketId":"\(self.id)"])
         
-        return try self.backblaze.executeRequest(request, on: worker).map(to: JSON.self) { data in
-            return try JSON(data: data)
-        }.map(to: PreparedUploadInfo?.self) { requestResponse in
-            if let uploadUrlString = requestResponse["uploadUrl"].string,
-                let uploadUrl = URL(string: uploadUrlString),
-                let authToken = requestResponse["authorizationToken"].string {
-                
-                return PreparedUploadInfo(url: uploadUrl, authToken: authToken)
-            } else {
-                return nil
-            }
+        return try self.backblaze.executeRequest(request, on: worker).map(to: PreparedUploadInfo.self) { data in
+            let jdc = JSONDecoder()
+            return try jdc.decode(PreparedUploadInfo.self, from: data)
         }
     }
     
@@ -182,10 +183,7 @@ public class Bucket: CustomStringConvertible {
         
         request.httpBody = try httpJSON.rawData()
         
-        _ =
-            try self.backblaze.executeRequest(jsonFrom: request, on: worker).map(to: Void.self) { json in
-            self.type = BucketType.interpret(type: json["bucketType"].stringValue)
-        }
+        _ = try self.backblaze.executeRequest(request, on: worker)
     }
     
     public var description: String {

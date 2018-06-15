@@ -89,8 +89,11 @@ public class Backblaze {
         request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["accountId":"\(self.accountId)", "bucketName":"\(bucketName)", "bucketType":"allPrivate"], options: .prettyPrinted)
         
-        return try executeRequest(jsonFrom: request, on: worker).map(to: Bucket.self) { json in
-            return Bucket(json: json, b2: self)
+        return try executeRequest(request, on: worker).map(to: Bucket.self) { data in
+            let jdc = JSONDecoder()
+            let response = try jdc.decode(Bucket.CreatePayload.self, from: data)
+            
+            return Bucket(response, b2: self)
         }
     }
     
@@ -106,9 +109,12 @@ public class Backblaze {
         request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["accountId":"\(self.accountId)"], options: .prettyPrinted)
         
-        return try executeRequest(jsonFrom: request, on: worker).map(to: [Bucket].self) { json in
-            return json["buckets"].arrayValue.map({ (bucket) -> Bucket in
-                return Bucket(json: bucket, b2: self)
+        return try executeRequest(request, on: worker).map(to: [Bucket].self) { data in
+            let jdc = JSONDecoder()
+            let bucketData = try jdc.decode([Bucket.CreatePayload].self, from: data)
+            
+            return bucketData.map({ (bucketData) -> Bucket in
+                return Bucket(bucketData, b2: self)
             })
         }
     }
@@ -237,12 +243,6 @@ public class Backblaze {
         task.resume()
         
         return requestDataPromise.futureResult
-    }
-    
-    public func executeRequest(jsonFrom request: URLRequest, withSessionConfig sessionConfig: URLSessionConfiguration? = nil, on worker: Worker) throws -> Future<JSON> {
-        return try executeRequest(request, withSessionConfig: sessionConfig, on: worker).map(to: JSON.self) { data in
-            return try JSON(data: data)
-        }
     }
     
     //MARK:- Unprocessed
