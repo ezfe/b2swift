@@ -204,7 +204,11 @@ public class Backblaze {
         return try executeRequest(request, on: worker)
     }
     
-    public func hideFile(named fileName: String, inBucket bucket: Bucket, on worker: Worker) throws -> Future<JSON> {
+    /// Hides a file so that downloading by name will not find the file,
+    /// but previous versions of the file are still stored.
+    ///
+    /// [Backblaze Documentation](https://www.backblaze.com/b2/docs/b2_hide_file.html)
+    public func hideFile(named fileName: String, in bucket: Bucket, on worker: Worker) throws -> Future<HideFileResponse> {
         guard let apiUrl = self.apiUrl, let authorizationToken = self.authorizationToken else {
             throw BackblazeError.unauthenticated
         }
@@ -216,8 +220,10 @@ public class Backblaze {
         request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
         request.httpBody = "{\"fileName\":\"\(fileName)\",\"bucketId\":\"\(bucket.id)\"}".data(using: .utf8, allowLossyConversion: false)
             
-        return try executeRequest(request, on: worker).map(to: JSON.self) { data in
-            return try JSON(data: data)
+        return try executeRequest(request, on: worker).map(to: HideFileResponse.self) { data in
+            let jdc = JSONDecoder()
+            jdc.dateDecodingStrategy = .millisecondsSince1970
+            return try jdc.decode(HideFileResponse.self, from: data)
         }
     }
     
