@@ -170,22 +170,10 @@ public class Backblaze {
         }
     }
     
+    /// Downloads one file from B2.
+    ///
+    /// [Backblaze Documentation](https://www.backblaze.com/b2/docs/b2_download_file_by_id.html)
     public func downloadFile(withId fileId: String, on worker: Worker) throws -> Future<Data> {
-        guard let downloadUrl = self.downloadUrl, let authorizationToken = self.authorizationToken else {
-            throw BackblazeError.unauthenticated
-        }
-        
-        let url = downloadUrl.appendingPathComponent("/b2api/v1/b2_download_file_by_id")
-        var request = URLRequest(url: url)
-        
-        request.httpMethod = "POST"
-        request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: ["fileId":"\(fileId)"], options: .prettyPrinted)
-        
-        return try executeRequest(request, on: worker)
-    }
-    
-    public func downloadFileEx(withId fileId: String, on worker: Worker) throws -> Future<Data> {
         guard let downloadUrl = self.downloadUrl, let authorizationToken = self.authorizationToken else {
             throw BackblazeError.unauthenticated
         }
