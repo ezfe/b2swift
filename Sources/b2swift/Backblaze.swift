@@ -109,10 +109,13 @@ public class Backblaze {
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["accountId":"\(self.accountId)"], options: .prettyPrinted)
         
         return try executeRequest(request, on: worker).map(to: [Bucket].self) { data in
+            struct BucketList: Codable {
+                let buckets: [Bucket.CreatePayload]
+            }
             let jdc = JSONDecoder()
-            let bucketData = try jdc.decode([Bucket.CreatePayload].self, from: data)
+            let bucketList = try jdc.decode(BucketList.self, from: data)
             
-            return bucketData.map({ (bucketData) -> Bucket in
+            return bucketList.buckets.map({ (bucketData) -> Bucket in
                 return Bucket(bucketData, b2: self)
             })
         }
