@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import Async
+import NIO
 
 extension Backblaze {
     /**
@@ -18,7 +18,10 @@ extension Backblaze {
      * API equivelant to b2_authorize_account
      */
     @discardableResult
-    public func authorize(on worker: Worker) throws -> Future<Bool> {
+    public func authorize(on eventLoop: EventLoop) throws -> EventLoopFuture<Void> {
+        if self.authorizationToken != nil {
+            return eventLoop.makeSucceededFuture(())
+        }
         let url = self.authURL.appendingPathComponent("b2api/v1/b2_authorize_account")
         var request = URLRequest(url: url)
         
@@ -32,7 +35,9 @@ extension Backblaze {
         let authSessionConfig = URLSessionConfiguration.default
         authSessionConfig.httpAdditionalHeaders = ["Authorization": "Basic \(authStringBase64)"]
         
-        return try executeRequest(request, withSessionConfig: authSessionConfig, on: worker).map(to: Bool.self) { data in
+        return try executeRequest(request,
+                                  withSessionConfig: authSessionConfig,
+                                  on: eventLoop).flatMapThrowing { data in
             do {
                 struct RawAuthorizationResult: Codable {
                     var accountId: String
@@ -53,7 +58,7 @@ extension Backblaze {
                 self.recommendedPartSize = requestResults.recommendedPartSize
                 self.absoluteMinimumPartSize = requestResults.absoluteMinimumPartSize
                 
-                return true
+                return
             } catch {
                 throw BackblazeError.malformedResponse
             }
