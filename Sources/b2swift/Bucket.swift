@@ -63,7 +63,6 @@ public class Bucket: CustomStringConvertible {
     
     //MARK:- Uploading Files
     
-    @available(macOS 10.11, *)
     public func upload(url: URL, on eventLoop: EventLoop) throws -> EventLoopFuture<UploadFileResponse> {
         if url.isFileURL {
             if url.hasDirectoryPath {
