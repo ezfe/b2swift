@@ -80,9 +80,9 @@ public class Backblaze {
     
     //MARK:- Buckets
     
-    public func createBucket(named bucketName: String, on eventLoop: EventLoop) throws -> EventLoopFuture<Bucket> {
+    public func createBucket(named bucketName: String, on eventLoop: EventLoop) -> EventLoopFuture<Bucket> {
         guard let apiUrl = self.apiUrl, let authorizationToken = self.authorizationToken else {
-            throw BackblazeError.unauthenticated
+            return eventLoop.makeFailedFuture(BackblazeError.unauthenticated)
         }
         
         let url = apiUrl.appendingPathComponent("/b2api/v1/b2_create_bucket")
@@ -92,7 +92,7 @@ public class Backblaze {
         request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["accountId":"\(self.accountId)", "bucketName":"\(bucketName)", "bucketType":"allPrivate"], options: .prettyPrinted)
         
-        return try executeRequest(request, on: eventLoop).flatMapThrowing { data in
+        return executeRequest(request, on: eventLoop).flatMapThrowing { data in
             let jdc = JSONDecoder()
             let response = try jdc.decode(Bucket.CreatePayload.self, from: data)
             
@@ -112,7 +112,7 @@ public class Backblaze {
         request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["accountId":"\(self.accountId)"])
         
-        return try executeRequest(request, on: eventLoop).flatMapThrowing { data in
+        return executeRequest(request, on: eventLoop).flatMapThrowing { data in
             struct BucketList: Codable {
                 let buckets: [Bucket.CreatePayload]
             }
@@ -141,64 +141,12 @@ public class Backblaze {
 //        return json["fileId"].stringValue
 //    }
     
-    public func listFileNames(in bucket: Bucket,
-                              startFileName: String? = nil,
-                              maxFileCount: Int? = nil,
-                              on eventLoop: EventLoop) throws -> EventLoopFuture<[ListFileNamesResponse]> {
-
-        if let url = self.apiUrl?.appendingPathComponent("/b2api/v1/b2_list_file_names") {
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.addValue(self.authorizationToken!, forHTTPHeaderField: "Authorization")
-//            var params: JSON = ["bucketId": bucket.id]
-//            if let startFileStr = startFileName {
-//                params["startFileName"] = JSON(startFileStr)
-//            }
-//            if let maxFileCount = maxFileCount {
-//                params["startFileName"] = JSON(String(maxFileCount))
-//            }
-//            request.httpBody = try! params.rawData()
-            
-            return try executeRequest(request, withSessionConfig: nil, on: eventLoop).flatMapThrowing { data in
-                let jdc = JSONDecoder()
-                jdc.dateDecodingStrategy = .millisecondsSince1970
-                return try jdc.decode([ListFileNamesResponse].self, from: data)
-            }
-        }
-
-        return eventLoop.makeSucceededFuture([ListFileNamesResponse]())
-    }
-    
-    public func findFirstFileIdForName(searchFileName: String,
-                                       bucket: Bucket,
-                                       on eventLoop: EventLoop) -> EventLoopFuture<String?> {
-
-        do {
-            return try self.listFileNames(
-                                in: bucket,
-                                startFileName: nil,
-                                maxFileCount: -1,
-                                on: eventLoop).map { filenames in
-
-                for file in filenames {
-                    if file.fileName.caseInsensitiveCompare(searchFileName) == .orderedSame {
-                        return file.fileId
-                    }
-                }
-                return nil
-            }
-        } catch let err {
-            print(err.localizedDescription)
-            return eventLoop.makeSucceededFuture(nil)
-        }
-    }
-    
     /// Downloads one file from B2.
     ///
     /// [Backblaze Documentation](https://www.backblaze.com/b2/docs/b2_download_file_by_id.html)
-    public func downloadFile(withId fileId: String, on eventLoop: EventLoop) throws -> EventLoopFuture<Data> {
+    public func downloadFile(withId fileId: String, on eventLoop: EventLoop) -> EventLoopFuture<Data> {
         guard let downloadUrl = self.downloadUrl, let authorizationToken = self.authorizationToken else {
-            throw BackblazeError.unauthenticated
+            return eventLoop.makeFailedFuture(BackblazeError.unauthenticated)
         }
         
         let url = downloadUrl.appendingPathComponent("/b2api/v1/b2_download_file_by_id")
@@ -212,16 +160,16 @@ public class Backblaze {
         request.httpMethod = "GET"
         request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
         
-        return try executeRequest(request, on: eventLoop)
+        return executeRequest(request, on: eventLoop)
     }
     
     /// Hides a file so that downloading by name will not find the file,
     /// but previous versions of the file are still stored.
     ///
     /// [Backblaze Documentation](https://www.backblaze.com/b2/docs/b2_hide_file.html)
-    public func hideFile(named fileName: String, in bucket: Bucket, on eventLoop: EventLoop) throws -> EventLoopFuture<HideFileResponse> {
+    public func hideFile(named fileName: String, in bucket: Bucket, on eventLoop: EventLoop) -> EventLoopFuture<HideFileResponse> {
         guard let apiUrl = self.apiUrl, let authorizationToken = self.authorizationToken else {
-            throw BackblazeError.unauthenticated
+            return eventLoop.makeFailedFuture(BackblazeError.unauthenticated)
         }
 
         let url = apiUrl.appendingPathComponent("/b2api/v1/b2_hide_file")
@@ -231,7 +179,7 @@ public class Backblaze {
         request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
         request.httpBody = "{\"fileName\":\"\(fileName)\",\"bucketId\":\"\(bucket.id)\"}".data(using: .utf8, allowLossyConversion: false)
             
-        return try executeRequest(request, on: eventLoop).flatMapThrowing { data in
+        return executeRequest(request, on: eventLoop).flatMapThrowing { data in
             let jdc = JSONDecoder()
             jdc.dateDecodingStrategy = .millisecondsSince1970
             return try jdc.decode(HideFileResponse.self, from: data)
@@ -243,7 +191,7 @@ public class Backblaze {
     
     public func executeRequest(_ request: URLRequest,
                                withSessionConfig sessionConfig: URLSessionConfiguration? = nil,
-                               on eventLoop: EventLoop) throws -> EventLoopFuture<Data> {
+                               on eventLoop: EventLoop) -> EventLoopFuture<Data> {
 
         let session: URLSession
         if let sessionConfig = sessionConfig {

@@ -43,9 +43,9 @@ extension Backblaze {
         ]
 
         // Execute the network request
-        return try executeRequest(request,
-                                  withSessionConfig: authSessionConfig,
-                                  on: eventLoop).flatMap { data in
+        return executeRequest(request,
+                              withSessionConfig: authSessionConfig,
+                              on: eventLoop).flatMap { data in
             do {
                 struct RawAuthorizationResult: Decodable {
                     let accountId: String
