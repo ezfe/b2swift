@@ -15,7 +15,7 @@ import Crypto
 import Files
 import NIO
 
-public class Bucket: CustomStringConvertible {
+public struct Bucket: CustomStringConvertible {
     public struct CreatePayload: Codable {
         let accountId: String
         let bucketId: String
@@ -58,7 +58,7 @@ public class Bucket: CustomStringConvertible {
         self.backblaze = b2
     }
     
-    internal convenience init(_ payload: CreatePayload, b2: Backblaze) {
+    internal init(_ payload: CreatePayload, b2: Backblaze) {
         self.init(id: payload.bucketId, name: payload.bucketName, type: payload.bucketType, b2: b2)
     }
     

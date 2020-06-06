@@ -14,7 +14,7 @@ import FoundationNetworking
 import Crypto
 import NIO
 
-public class Backblaze {
+public final class Backblaze {
     public enum BackblazeError: LocalizedError {
         case urlConstructionFailed
         case urlEncodingFailed
