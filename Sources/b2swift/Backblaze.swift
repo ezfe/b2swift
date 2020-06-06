@@ -126,7 +126,7 @@ public class Backblaze {
         do {
             let jsonEncoder = JSONEncoder()
             request.httpBody = try jsonEncoder.encode([
-                "accountId":" \(self.accountId)",
+                "accountId": self.accountId,
                 "bucketId": bucketId,
                 "bucketName": bucketName
             ])
