@@ -11,7 +11,7 @@ import Foundation
 import FoundationNetworking
 #endif
 
-import CryptoSwift
+import Crypto
 import NIO
 
 public class Backblaze {

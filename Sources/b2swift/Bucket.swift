@@ -11,7 +11,7 @@ import Foundation
 import FoundationNetworking
 #endif
 
-import CryptoSwift
+import Crypto
 import Files
 import NIO
 
@@ -77,7 +77,7 @@ public class Bucket: CustomStringConvertible {
         } else {
             let data = try Data(contentsOf: url)
             let filename = url.lastPathComponent
-            return try self.upload(data: data, at: filename, on: eventLoop)
+            return self.upload(data: data, at: filename, on: eventLoop)
         }
     }
     
@@ -102,7 +102,7 @@ public class Bucket: CustomStringConvertible {
                        at path: String,
                        contentType: String? = nil,
                        sha1: String? = nil,
-                       on eventLoop: EventLoop) throws -> EventLoopFuture<UploadFileResponse> {
+                       on eventLoop: EventLoop) -> EventLoopFuture<UploadFileResponse> {
 
         return self.prepareUpload(on: eventLoop).flatMap { uploadInfo -> EventLoopFuture<Data> in
             guard let encodedFilename = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
@@ -123,7 +123,7 @@ public class Bucket: CustomStringConvertible {
             let resolvedContentType = contentType ?? BackblazeContentTypes.auto
             request.addValue(resolvedContentType, forHTTPHeaderField: BackblazeHTTPHeaders.contentType)
             
-            let resolvedSha1 = sha1 ?? data.sha1().map({ String(format: "%02hhx", $0) }).joined()
+            let resolvedSha1 = sha1 ?? data.sha1
             request.addValue(resolvedSha1, forHTTPHeaderField: BackblazeHTTPHeaders.contentSHA1)
 
             return self.executeUploadRequest(request, with: data, on: eventLoop)
