@@ -17,6 +17,7 @@ import NIO
 
 public class Bucket: CustomStringConvertible {
     public struct CreatePayload: Codable {
+        let accountId: String
         let bucketId: String
         let bucketName: String
         let bucketType: Bucket.BucketType
@@ -39,7 +40,7 @@ public class Bucket: CustomStringConvertible {
     
     let id: String
     let name: String
-    private(set) var type: BucketType
+    let type: BucketType
     
     unowned var backblaze: Backblaze
     

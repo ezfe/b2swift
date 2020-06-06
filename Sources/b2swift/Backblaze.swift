@@ -99,19 +99,41 @@ public class Backblaze {
             return Bucket(response, b2: self)
         }
     }
-    
-    public func listBuckets(on eventLoop: EventLoop) throws -> EventLoopFuture<[Bucket]>  {
+
+    /**
+     * List buckets on the account
+     *
+     * - Parameters:
+     *   - bucketId: When bucketId is specified, the result will be a list containing just this bucket, if it's present in the account, or no buckets if the account does not have a bucket with this ID.
+     *   - bucketName: When bucketName is specified, the result will be a list containing just this bucket, if it's present in the account, or no buckets if the account does not have a bucket with this ID.
+     *
+     * - Note:
+     *   `bucketTypes` parameter is unimplemented
+     */
+    public func listBuckets(bucketId: String? = nil,
+                            bucketName: String? = nil,
+                            on eventLoop: EventLoop) -> EventLoopFuture<[Bucket]>  {
         guard let apiUrl = self.apiUrl, let authorizationToken = self.authorizationToken else {
-            throw BackblazeError.unauthenticated
+            return eventLoop.makeFailedFuture(BackblazeError.unauthenticated)
         }
         
-        let url = apiUrl.appendingPathComponent("/b2api/v1/b2_list_buckets")
+        let url = apiUrl.appendingPathComponent("/b2api/v2/b2_list_buckets")
         var request = URLRequest(url: url)
         
         request.httpMethod = "POST"
         request.addValue(authorizationToken, forHTTPHeaderField: "Authorization")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: ["accountId":"\(self.accountId)"])
-        
+
+        do {
+            let jsonEncoder = JSONEncoder()
+            request.httpBody = try jsonEncoder.encode([
+                "accountId":" \(self.accountId)",
+                "bucketId": bucketId,
+                "bucketName": bucketName
+            ])
+        } catch let err {
+            return eventLoop.makeFailedFuture(err)
+        }
+
         return executeRequest(request, on: eventLoop).flatMapThrowing { data in
             struct BucketList: Codable {
                 let buckets: [Bucket.CreatePayload]
@@ -126,10 +148,10 @@ public class Backblaze {
         }
     }
     
-    public func bucket(named searchBucketName: String, on eventLoop: EventLoop) throws -> EventLoopFuture<Bucket?> {
-        return try self.listBuckets(on: eventLoop).flatMapThrowing { buckets in
-            for bucket in buckets where bucket.name == searchBucketName {
-                return bucket
+    public func bucket(named searchBucketName: String, on eventLoop: EventLoop) -> EventLoopFuture<Bucket?> {
+        return self.listBuckets(bucketName: searchBucketName, on: eventLoop).map { buckets in
+            if let index = buckets.firstIndex(where: { $0.name == searchBucketName }) {
+                return buckets[index]
             }
             return nil
         }
